@@ -1,0 +1,425 @@
+Project Phoenix Skeleton Code: Unified Data Platform
+
+This structure breaks the project into distinct Python modules (data_ingestion, model_serving, dashboard), which communicate logically via a shared database (simulated by a Pandas DataFrame in this skeleton, but designed for a TSDB like InfluxDB).
+
+1. Core Structure (project_phoenix/)
+
+project_phoenix/
+├── app.py              # The main Plotly Dash GUI (Visualization & UI)
+├── config.py           # System-wide constants, file paths, DB config
+├── data/
+│   └── materials_db.csv  # Placeholder for Materials Metadata DB
+├── services/
+│   ├── db_connector.py # Handles connection to InfluxDB/PostgreSQL (TSDB/Relational)
+│   ├── model_api.py    # FastAPI client/stub to interact with Model Serving (Control)
+│   └── simulator.py    # Digital Twin/ROM service stub (for 'Time Warp')
+├── data_ingestion/     # Stub for Edge/Kafka/MQTT client
+│   └── sensor_streamer.py
+└── modeling/           # Stubs for ML components (PINN, RL, GNN, SHM)
+    ├── pinn_model.py
+    └── rl_controller.py
+
+2. Configuration (config.py)
+
+Python
+
+# project_phoenix/config.py
+
+import os
+
+# --- 🚀 Environment and Paths ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_EXPORT_PATH = os.path.join(BASE_DIR, "exports")
+os.makedirs(DATA_EXPORT_PATH, exist_ok=True)
+
+# --- 💾 Database (Time-Series Data) Configuration ---
+# In a real app, this would hold InfluxDB/TimescaleDB connection details
+TSDB_CONFIG = {
+    "host": "localhost",
+    "port": 8086,
+    "database": "cryo_data",
+    # TODO: Add credentials (user/password/token)
+}
+
+# --- ⚙️ System Constants ---
+SENSOR_LIST = [
+    "T_Cold_Head_K", "T_Shield_K", "Pressure_MPa",
+    "Vibration_X_g", "Current_A", "Flow_LPM",
+    # TODO: Add all relevant sensors from the Instrumentation Layer
+]
+
+# Defines the maximum lookback for historical graphs (e.g., 24 hours)
+MAX_HISTORY_HOURS = 24
+
+3. Data Connector Stub (services/db_connector.py)
+
+This module simulates the interaction with your TSDB (InfluxDB/TimescaleDB).
+Python
+
+# project_phoenix/services/db_connector.py
+
+import pandas as pd
+import numpy as np
+import datetime as dt
+from config import SENSOR_LIST
+
+# --- ⚠️ SIMULATION: In a real environment, this connects to a database!
+# This DataFrame simulates the data stored in a Time-Series Database (TSDB).
+SIMULATED_TSDB = pd.DataFrame()
+# --- END SIMULATION ---
+
+def get_live_data(limit=10):
+    """
+    TODO: Actual implementation should query the TSDB for the latest 'limit'
+          records across all sensors.
+    """
+    global SIMULATED_TSDB
+    if SIMULATED_TSDB.empty:
+        # Create dummy data if the DB is empty
+        now = dt.datetime.now()
+        timestamps = [now - dt.timedelta(seconds=i) for i in range(limit)][::-1]
+        data = {s: np.random.rand(limit) * (10 if 'T' in s else 1) for s in SENSOR_LIST}
+        SIMULATED_TSDB = pd.DataFrame(data, index=timestamps).rename_axis('timestamp')
+    
+    return SIMULATED_TSDB.tail(limit)
+
+def get_historical_data(start_time, end_time, sensors=SENSOR_LIST):
+    """
+    TODO: Actual implementation queries the TSDB between start_time and end_time,
+          optionally filtering by 'sensors'.
+    """
+    global SIMULATED_TSDB
+    # Example: Filter simulated data
+    data = SIMULATED_TSDB[(SIMULATED_TSDB.index >= start_time) & (SIMULATED_TSDB.index <= end_time)]
+    return data[sensors]
+    
+# TODO: Add function to fetch experiment metadata from PostgreSQL
+def get_experiment_metadata(experiment_id):
+    """
+    Example: Returns RL parameters, PINN loss, GNN run details for a specific experiment run.
+    """
+    return {
+        "Exp_ID": experiment_id,
+        "Start_Time": "2025-10-25 08:00:00",
+        "RL_Agent": "SAC_v3",
+        "Target_Temp": "4.2 K",
+        # TODO: Add more detailed data/links to model versions (DVC)
+    }
+
+4. Main Dash GUI (app.py)
+
+This is the core of the Visualization & UI Layer. It uses Plotly Dash for the web interface and includes detailed TODOs for your required features: Time Acceleration (via a simulator stub), Data Export, and rich Graphical Analysis.
+
+🧪 GUI Interface Control Center (app.py skeleton)
+
+Python
+
+# project_phoenix/app.py
+
+import dash
+from dash import dcc, html, dash_table
+from dash.dependencies import Input, Output, State
+import plotly.graph_objects as go
+import pandas as pd
+import base64
+import io
+import datetime as dt
+
+# Import stubs/configs
+from config import SENSOR_LIST, MAX_HISTORY_HOURS, DATA_EXPORT_PATH
+from services.db_connector import get_live_data, get_historical_data, get_experiment_metadata
+from services.model_api import set_control_target, get_model_status
+from services.simulator import toggle_simulator_mode
+
+# --- 1. Initialization ---
+app = dash.Dash(__name__, external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'])
+
+# Global state for historical view (simulating a long-running process)
+historical_data_cache = pd.DataFrame() 
+
+
+# --- 2. GUI Layout Components ---
+## 2.1. Control Panel: Real-Time Interaction
+CONTROL_PANEL = html.Div([
+    html.H4("🔬 Control & Experiment Settings"),
+    html.Div([
+        # Target Setpoint Control (RL/PID)
+        html.Label("Target Cold Head Temp (K):"),
+        dcc.Input(id='target-temp-input', type='number', value=4.0, min=1.0, step=0.1),
+        html.Button("Set Target", id='set-target-button', n_clicks=0, className='button-primary'),
+        html.Div(id='target-output'),
+        
+        html.Hr(),
+
+        # TIME ACCELERATION CONTROL (Digital Twin Integration)
+        # Allows running the Digital Twin (Simulator) faster than real-time to see
+        # how the model *would* change over time or to train faster.
+        html.H5("⏳ Time Warp Control"),
+        html.Div([
+            html.Label("Simulation Speed (x Real Time):"),
+            dcc.Slider(
+                id='simulation-speed-slider', min=1, max=100, step=1, value=1,
+                marks={i: f'{i}x' for i in [1, 10, 25, 50, 100]}
+            ),
+            html.Button("Toggle Sim/Live", id='toggle-sim-button', n_clicks=0, className='button-secondary'),
+            html.Div(id='sim-status-output', children="Status: LIVE"),
+        ], style={'padding': '10px', 'border': '1px solid #ccc', 'margin-bottom': '10px'}),
+        
+        html.Hr(),
+
+        # Data Export Feature
+        html.H5("📤 Data Export"),
+        html.Div([
+            dcc.DatePickerRange(
+                id='export-date-range',
+                start_date=dt.datetime.now() - dt.timedelta(days=1),
+                end_date=dt.datetime.now(),
+                display_format='YYYY-MM-DD'
+            ),
+            html.Button("Prepare Data & Export", id='export-button', n_clicks=0, className='button-success'),
+            dcc.Download(id="download-dataframe-csv"),
+            html.Div(id='export-status-output'),
+        ])
+        
+    ], style={'padding': '10px'})
+])
+
+## 2.2. Graphing & Data Analysis Section
+GRAPH_ANALYSIS = html.Div([
+    # Real-time Gauge (Quick Status)
+    html.H4("⚡ Live Cryocooler Status"),
+    dcc.Graph(id='live-gauge-plot', config={'displayModeBar': False}),
+    
+    html.Hr(),
+
+    # TIME SERIES PLOTS (Core Visualization)
+    html.H4("📉 Historical/Over-Time Data Analysis"),
+    dcc.Dropdown(
+        id='sensor-dropdown',
+        options=[{'label': s, 'value': s} for s in SENSOR_LIST],
+        value=SENSOR_LIST[:3],  # Default selected sensors
+        multi=True,
+    ),
+    # This graph will display the data OVER TIME, fulfilling the requirement.
+    dcc.Graph(id='time-series-plot', style={'height': '500px'}),
+    
+    html.Hr(),
+
+    # DETAILED DATA/GRAPH SECTION (Materials, SHM, Noise)
+    html.H4("📊 Model & Detailed Data Views"),
+    dcc.Tabs([
+        dcc.Tab(label='Model Status', children=[
+            html.Div(id='model-status-data'),
+            # TODO: Add PINN Loss Plot over epochs
+            # TODO: Add RL Reward Plot over episodes
+        ]),
+        dcc.Tab(label='Materials Informatics (GNN)', children=[
+            html.H5("Proposed Materials:"),
+            # TODO: Display GNN suggested materials (e.g., using a DataTable)
+            dash_table.DataTable(
+                id='materials-table',
+                columns=[{"name": "Property", "id": "Prop"}, {"name": "Value", "id": "Val"}],
+                data=[{'Prop': 'Material A', 'Val': 'Good'}, {'Prop': 'Material B', 'Val': 'Better'}],
+                # TODO: Add Interactive GNN/Graph visualization
+            )
+        ]),
+        dcc.Tab(label='SHM & Quantum Noise', children=[
+            html.H5("Anomaly Detection:"),
+            dcc.Graph(id='shm-spectral-plot'),
+            html.Div(id='anomaly-alert', style={'color': 'red', 'font-weight': 'bold'}),
+            # TODO: Add Autoencoder/VAE Latent Space T-SNE/UMAP plot
+        ]),
+    ])
+])
+
+## 2.3. Dashboard Layout
+app.layout = html.Div([
+    html.H1("PROJECT PHOENIX: Cryogenics Platform", style={'textAlign': 'center'}),
+    html.Div([
+        # Left Column: Control Panel
+        html.Div(CONTROL_PANEL, className='three columns', style={'borderRight': '1px solid #ccc'}),
+        # Right Column: Data and Graphs
+        html.Div(GRAPH_ANALYSIS, className='nine columns'),
+    ], className='row'),
+    
+    # Hidden components for real-time updates and long-running data
+    dcc.Interval(id='interval-component', interval=5*1000, n_intervals=0), # 5 sec updates
+    dcc.Store(id='historical-data-store', data=[]), # Stores data for graph over time
+])
+
+
+# --- 3. Callbacks (Interaction Logic) ---
+
+## 3.1. Real-Time Data Update and Storage
+@app.callback(
+    [Output('live-gauge-plot', 'figure'),
+     Output('historical-data-store', 'data')],
+    [Input('interval-component', 'n_intervals')],
+    [State('historical-data-store', 'data')]
+)
+def update_data_and_store(n, current_data_json):
+    # Fetch new data
+    new_data = get_live_data(limit=1).reset_index().rename(columns={'index': 'timestamp'})
+    
+    # 1. Update Historical Data Store (for the 'data over time' requirement)
+    # Convert existing JSON data back to DataFrame, append new data, and trim
+    if current_data_json:
+        history_df = pd.DataFrame(current_data_json)
+    else:
+        history_df = pd.DataFrame(columns=['timestamp'] + SENSOR_LIST)
+        
+    # Append and keep only the last MAX_HISTORY_HOURS
+    history_df = pd.concat([history_df, new_data], ignore_index=True)
+    
+    # Remove duplicates and sort (robustness)
+    history_df = history_df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
+    
+    # Trim old data
+    trim_time = dt.datetime.now() - dt.timedelta(hours=MAX_HISTORY_HOURS)
+    history_df = history_df[history_df['timestamp'] >= trim_time.isoformat()] 
+    
+    new_data_json = history_df.to_dict('records') # Store back as list of dicts/json
+    
+    # 2. Update Live Gauge Plot (for immediate status)
+    latest_temp = new_data['T_Cold_Head_K'].iloc[-1]
+    gauge_fig = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = latest_temp,
+        title = {'text': "Cold Head Temp (K)"},
+        gauge = {'axis': {'range': [None, 5.0]},
+                 'steps': [
+                     {'range': [4.5, 5.0], 'color': "red"},
+                     {'range': [1.0, 4.5], 'color': "green"}],
+                 'bar': {'color': "darkblue"}}
+    ))
+    gauge_fig.update_layout(margin=dict(l=20, r=20, t=30, b=30))
+    
+    return gauge_fig, new_data_json
+
+## 3.2. Time Series Plotting (Using Stored Data)
+@app.callback(
+    Output('time-series-plot', 'figure'),
+    [Input('historical-data-store', 'data'),
+     Input('sensor-dropdown', 'value')]
+)
+def update_time_series_plot(data_json, selected_sensors):
+    if not data_json or not selected_sensors:
+        return go.Figure()
+        
+    history_df = pd.DataFrame(data_json)
+    history_df['timestamp'] = pd.to_datetime(history_df['timestamp']) # Ensure datetime type
+    
+    fig = go.Figure()
+    for sensor in selected_sensors:
+        # Plot data over time
+        fig.add_trace(go.Scatter(
+            x=history_df['timestamp'],
+            y=history_df[sensor],
+            mode='lines',
+            name=sensor
+        ))
+        
+    fig.update_layout(
+        title='Sensor Data Over Time',
+        xaxis_title='Time',
+        yaxis_title='Sensor Value',
+        hovermode="x unified",
+        uirevision='constant' # Keeps zoom/pan settings
+    )
+    # TODO: Add vertical lines for key events (e.g., control changes, anomalies)
+    return fig
+
+## 3.3. Control Callbacks (Set Target, Time Warp)
+@app.callback(
+    Output('target-output', 'children'),
+    [Input('set-target-button', 'n_clicks')],
+    [State('target-temp-input', 'value')]
+)
+def set_target_temp(n_clicks, target_temp):
+    if n_clicks > 0:
+        # TODO: Call the Model API (FastAPI) to update the control loop
+        # set_control_target(target_temp)
+        return f"✅ Target set to {target_temp} K. Awaiting RL response..."
+    return ""
+
+@app.callback(
+    Output('sim-status-output', 'children'),
+    [Input('toggle-sim-button', 'n_clicks'),
+     Input('simulation-speed-slider', 'value')]
+)
+def toggle_simulator(n_clicks, speed):
+    current_status = "Status: LIVE"
+    if n_clicks % 2 != 0:
+        # TODO: Call the Digital Twin Service stub
+        # toggle_simulator_mode(enabled=True, speed_factor=speed)
+        current_status = f"Status: 🚀 SIMULATING ({speed}x)"
+    else:
+        # toggle_simulator_mode(enabled=False)
+        current_status = "Status: LIVE"
+        
+    return current_status
+
+## 3.4. Data Export Callback
+@app.callback(
+    [Output("download-dataframe-csv", "data"),
+     Output('export-status-output', 'children')],
+    [Input('export-button', 'n_clicks')],
+    [State('export-date-range', 'start_date'),
+     State('export-date-range', 'end_date')]
+)
+def export_data(n_clicks, start_date, end_date):
+    if n_clicks > 0:
+        try:
+            # 1. Fetch the data for the selected range
+            df_export = get_historical_data(start_date, end_date)
+            
+            # 2. Prepare the data for download
+            return_data = dcc.send_data_frame(df_export.to_csv, 
+                                             f"phoenix_data_export_{start_date.split('T')[0]}_to_{end_date.split('T')[0]}.csv")
+                                             
+            # 3. Update status
+            return return_data, "✅ Data prepared for download!"
+            
+        except Exception as e:
+            # TODO: Add proper logging
+            return None, f"❌ Export failed: {str(e)}"
+    
+    return None, ""
+
+
+# --- 4. Run Server ---
+if __name__ == '__main__':
+    # TODO: Use gunicorn/waitress for production deployment
+    app.run_server(debug=True)
+
+5. Model Serving Stub (services/model_api.py)
+
+This simulates the API that your control loop (FastAPI) would expose.
+Python
+
+# project_phoenix/services/model_api.py
+
+# TODO: Use the requests library to connect to the actual FastAPI service.
+
+def set_control_target(temperature_k: float):
+    """
+    Stub for setting the target temperature for the RL agent.
+    Actual implementation: POST request to FastAPI endpoint.
+    """
+    # response = requests.post("http://fastapi_service/control/set_target", json={"target": temperature_k})
+    # return response.json()
+    print(f"API Stub: Control target set to {temperature_k} K")
+    return {"status": "accepted", "target": temperature_k}
+
+def get_model_status():
+    """
+    Stub for getting the current status of all models (PINN, RL, GNN, SHM).
+    Actual implementation: GET request to FastAPI /status endpoint.
+    """
+    return {
+        "RL_Agent_State": "Active - Target 4.2 K",
+        "PINN_Loss_Recent": 0.0012,
+        "SHM_Alert": "None",
+        "GNN_Prediction_Time": "2025-10-25 10:00:00",
+        # TODO: Return more detailed metrics and alerts
+    }
